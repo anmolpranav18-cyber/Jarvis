@@ -31,7 +31,7 @@ class WakeWordService : Service() {
     private val commandProcessor = CommandProcessor()
     private var awaitingCommand = false
     private var running = false
-    private val handler = Handler(mainLooper)
+    private val handler by lazy { Handler(mainLooper) }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -148,3 +148,4 @@ class WakeWordService : Service() {
         super.onDestroy()
     }
 }
+
