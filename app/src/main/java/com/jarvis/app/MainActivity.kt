@@ -23,6 +23,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var logText: TextView
     private lateinit var toggleButton: Button
     private var serviceRunning = false
+    private var uiReady = false
 
     private val logReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -44,27 +45,36 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        val crashPrefs = getSharedPreferences("jarvis_crash", MODE_PRIVATE)
+        val lastCrash = crashPrefs.getString("last_crash", null)
+        if (lastCrash != null) {
+            crashPrefs.edit().remove("last_crash").apply()
+            showCrashText(lastCrash)
+            return
+        }
+
         try {
             setContentView(R.layout.activity_main)
-
             statusText = findViewById(R.id.statusText)
             logText = findViewById(R.id.logText)
             toggleButton = findViewById(R.id.toggleButton)
+            uiReady = true
 
             toggleButton.setOnClickListener {
                 if (serviceRunning) stopJarvis() else requestPermissionsAndStart()
             }
         } catch (e: Throwable) {
-            showCrash(e)
+            val sw = StringWriter()
+            e.printStackTrace(PrintWriter(sw))
+            showCrashText(sw.toString())
         }
     }
 
-    private fun showCrash(e: Throwable) {
-        val sw = StringWriter()
-        e.printStackTrace(PrintWriter(sw))
+    private fun showCrashText(text: String) {
         val scroll = ScrollView(this)
         val tv = TextView(this).apply {
-            text = "Startup error:\n\n${sw}"
+            setText("Startup error:\n\n$text")
             setTextIsSelectable(true)
             setPadding(32, 32, 32, 32)
             textSize = 12f
@@ -110,16 +120,17 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
-        if (::statusText.isInitialized) {
+        if (uiReady) {
             LocalBroadcastManager.getInstance(this)
                 .registerReceiver(logReceiver, IntentFilter(WakeWordService.ACTION_LOG))
         }
     }
 
     override fun onStop() {
-        if (::statusText.isInitialized) {
+        if (uiReady) {
             LocalBroadcastManager.getInstance(this).unregisterReceiver(logReceiver)
         }
         super.onStop()
     }
 }
+
