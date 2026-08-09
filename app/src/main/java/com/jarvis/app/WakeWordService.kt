@@ -4,6 +4,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
+import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -32,6 +33,7 @@ class WakeWordService : Service() {
     private var awaitingCommand = false
     private var running = false
     private val handler by lazy { Handler(mainLooper) }
+    private val audioManager by lazy { getSystemService(AUDIO_SERVICE) as AudioManager }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -56,6 +58,7 @@ class WakeWordService : Service() {
         speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
             setRecognitionListener(object : RecognitionListener {
                 override fun onResults(results: Bundle?) {
+                    unmuteBeep()
                     val heard = results
                         ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                         ?.firstOrNull()
@@ -66,6 +69,7 @@ class WakeWordService : Service() {
                 }
 
                 override fun onError(error: Int) {
+                    unmuteBeep()
                     handler.postDelayed({ startListeningCycle() }, 400)
                 }
 
@@ -83,7 +87,38 @@ class WakeWordService : Service() {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
             }
+            muteBeep()
             startListening(intent)
+        }
+    }
+
+    // Attempts to silence the system's "start listening" tone. Not
+    // guaranteed to work on every device/OEM, since this sound is
+    // played by the underlying recognition service, not our app —
+    // different phones route it through different audio streams, so
+    // we try muting all the likely candidates.
+    private val streamsToMute = intArrayOf(
+        AudioManager.STREAM_MUSIC,
+        AudioManager.STREAM_SYSTEM,
+        AudioManager.STREAM_NOTIFICATION,
+        AudioManager.STREAM_RING
+    )
+
+    private fun muteBeep() {
+        for (stream in streamsToMute) {
+            try {
+                audioManager.adjustStreamVolume(stream, AudioManager.ADJUST_MUTE, 0)
+            } catch (_: Throwable) {
+            }
+        }
+    }
+
+    private fun unmuteBeep() {
+        for (stream in streamsToMute) {
+            try {
+                audioManager.adjustStreamVolume(stream, AudioManager.ADJUST_UNMUTE, 0)
+            } catch (_: Throwable) {
+            }
         }
     }
 
@@ -93,9 +128,7 @@ class WakeWordService : Service() {
         if (awaitingCommand) {
             awaitingCommand = false
             log("You said: $heard")
-            val response = commandProcessor.process(heard)
-            log("Jarvis: $response")
-            speak(response)
+            respondTo(heard)
             return
         }
 
@@ -104,14 +137,72 @@ class WakeWordService : Service() {
             val after = heard.substringAfter(WAKE_WORD).trim()
             if (after.isNotEmpty()) {
                 log("You said: $after")
-                val response = commandProcessor.process(after)
-                log("Jarvis: $response")
-                speak(response)
+                respondTo(after)
             } else {
                 awaitingCommand = true
                 speak("Yes?")
             }
         }
+    }
+
+    private fun respondTo(text: String) {
+        if (AppLauncher.tryOpenApp(this, text)) {
+            log("Jarvis: Opening it now.")
+            speak("Opening it now.")
+            return
+        }
+        if (SystemActions.tryCall(this, text)) {
+            log("Jarvis: Calling.")
+            speak("Calling.")
+            return
+        }
+        if (SystemActions.tryText(this, text)) {
+            log("Jarvis: Opening your message.")
+            speak("Opening your message.")
+            return
+        }
+        if (SystemActions.tryAlarm(this, text)) {
+            log("Jarvis: Alarm set.")
+            speak("Alarm set.")
+            return
+        }
+        if (SystemActions.tryTimer(this, text)) {
+            log("Jarvis: Timer started.")
+            speak("Timer started.")
+            return
+        }
+        if (SystemActions.trySearch(this, text)) {
+            log("Jarvis: Here's what I found.")
+            speak("Here's what I found.")
+            return
+        }
+        val mathAnswer = SystemActions.tryMath(text)
+        if (mathAnswer != null) {
+            log("Jarvis: $mathAnswer")
+            speak(mathAnswer)
+            return
+        }
+
+        val local = commandProcessor.process(text)
+        if (!local.startsWith("I heard:")) {
+            log("Jarvis: $local")
+            speak(local)
+            return
+        }
+
+        // Nothing matched locally — try a free Wikipedia lookup as a
+        // last resort before giving up.
+        log("Looking that up…")
+        Thread {
+            val topic = text.removePrefix("what is ").removePrefix("who is ")
+                .removePrefix("what's ").removePrefix("tell me about ").trim()
+            val answer = WikipediaClient.lookup(topic.ifBlank { text })
+                ?: "I heard: $text. I couldn't find anything on that."
+            handler.post {
+                log("Jarvis: $answer")
+                speak(answer)
+            }
+        }.start()
     }
 
     private fun speak(text: String) {
