@@ -9,11 +9,13 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.widget.Button
+import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
+import java.io.PrintWriter
+import java.io.StringWriter
 
 class MainActivity : AppCompatActivity() {
 
@@ -42,15 +44,33 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
+        try {
+            setContentView(R.layout.activity_main)
 
-        statusText = findViewById(R.id.statusText)
-        logText = findViewById(R.id.logText)
-        toggleButton = findViewById(R.id.toggleButton)
+            statusText = findViewById(R.id.statusText)
+            logText = findViewById(R.id.logText)
+            toggleButton = findViewById(R.id.toggleButton)
 
-        toggleButton.setOnClickListener {
-            if (serviceRunning) stopJarvis() else requestPermissionsAndStart()
+            toggleButton.setOnClickListener {
+                if (serviceRunning) stopJarvis() else requestPermissionsAndStart()
+            }
+        } catch (e: Throwable) {
+            showCrash(e)
         }
+    }
+
+    private fun showCrash(e: Throwable) {
+        val sw = StringWriter()
+        e.printStackTrace(PrintWriter(sw))
+        val scroll = ScrollView(this)
+        val tv = TextView(this).apply {
+            text = "Startup error:\n\n${sw}"
+            setTextIsSelectable(true)
+            setPadding(32, 32, 32, 32)
+            textSize = 12f
+        }
+        scroll.addView(tv)
+        setContentView(scroll)
     }
 
     private fun requestPermissionsAndStart() {
@@ -69,11 +89,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startJarvis() {
-        ContextCompat.startForegroundService(this, Intent(this, WakeWordService::class.java))
-        getSharedPreferences("jarvis", MODE_PRIVATE).edit().putBoolean("enabled", true).apply()
-        serviceRunning = true
-        toggleButton.text = "Deactivate Jarvis"
-        statusText.text = "Starting…"
+        try {
+            ContextCompat.startForegroundService(this, Intent(this, WakeWordService::class.java))
+            getSharedPreferences("jarvis", MODE_PRIVATE).edit().putBoolean("enabled", true).apply()
+            serviceRunning = true
+            toggleButton.text = "Deactivate Jarvis"
+            statusText.text = "Starting…"
+        } catch (e: Throwable) {
+            statusText.text = "Failed to start: ${e.message}"
+        }
     }
 
     private fun stopJarvis() {
@@ -86,12 +110,16 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
-        LocalBroadcastManager.getInstance(this)
-            .registerReceiver(logReceiver, IntentFilter(WakeWordService.ACTION_LOG))
+        if (::statusText.isInitialized) {
+            LocalBroadcastManager.getInstance(this)
+                .registerReceiver(logReceiver, IntentFilter(WakeWordService.ACTION_LOG))
+        }
     }
 
     override fun onStop() {
-        LocalBroadcastManager.getInstance(this).unregisterReceiver(logReceiver)
+        if (::statusText.isInitialized) {
+            LocalBroadcastManager.getInstance(this).unregisterReceiver(logReceiver)
+        }
         super.onStop()
     }
 }
