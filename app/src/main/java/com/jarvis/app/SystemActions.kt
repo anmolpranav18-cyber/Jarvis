@@ -2,16 +2,22 @@ package com.jarvis.app
 
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.hardware.camera2.CameraManager
+import android.media.AudioManager
 import android.net.Uri
+import android.os.StatFs
 import android.provider.AlarmClock
 import android.provider.ContactsContract
+import android.provider.MediaStore
+import android.provider.Settings
 
 /**
- * Handles phone-level actions: calling, texting, alarms, timers,
- * web search, and simple math. All use standard Android intents that
- * don't require risky runtime permissions — calling and texting open
- * the dialer/messaging app pre-filled rather than sending directly,
- * so you always confirm before anything actually goes out.
+ * Handles phone-level actions: calling, texting, alarms, timers, web
+ * search, math, flashlight, volume, camera, settings shortcuts, and
+ * battery/storage info. All use standard Android intents or public
+ * system APIs — nothing silent, nothing that bypasses a permission
+ * or confirmation screen the phone would normally show.
  */
 object SystemActions {
 
@@ -149,6 +155,97 @@ object SystemActions {
             result.toString()
         }
         return "That's $formatted."
+    }
+
+    // --- Flashlight ---
+    fun tryFlashlight(context: Context, heard: String): String? {
+        val text = heard.lowercase().trim()
+        val turnOn = text.contains("flashlight") && (text.contains("on") || text.contains("turn on"))
+        val turnOff = text.contains("flashlight") && text.contains("off")
+        if (!turnOn && !turnOff) return null
+
+        return try {
+            val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+            val cameraId = cameraManager.cameraIdList.firstOrNull { id ->
+                cameraManager.getCameraCharacteristics(id)
+                    .get(android.hardware.camera2.CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
+            } ?: return "This device doesn't have a flashlight."
+            cameraManager.setTorchMode(cameraId, turnOn)
+            if (turnOn) "Flashlight on." else "Flashlight off."
+        } catch (e: Exception) {
+            "I couldn't control the flashlight."
+        }
+    }
+
+    // --- Volume ---
+    fun tryVolume(context: Context, heard: String): String? {
+        val text = heard.lowercase().trim()
+        if (!text.contains("volume")) return null
+        val up = text.contains("up") || text.contains("increase") || text.contains("raise")
+        val down = text.contains("down") || text.contains("decrease") || text.contains("lower")
+        if (!up && !down) return null
+
+        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val direction = if (up) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER
+        audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, direction, AudioManager.FLAG_SHOW_UI)
+        return if (up) "Volume up." else "Volume down."
+    }
+
+    // --- Camera ---
+    fun tryPhoto(context: Context, heard: String): Boolean {
+        val text = heard.lowercase().trim()
+        if (!text.contains("take a photo") && !text.contains("take a picture") && text != "open camera") return false
+        val intent = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(intent)
+        return true
+    }
+
+    // --- Settings shortcuts ---
+    fun trySettings(context: Context, heard: String): Boolean {
+        val text = heard.lowercase().trim()
+        val action = when {
+            text.contains("wifi") && text.contains("settings") -> Settings.ACTION_WIFI_SETTINGS
+            text.contains("wi-fi") && text.contains("settings") -> Settings.ACTION_WIFI_SETTINGS
+            text.contains("bluetooth") && text.contains("settings") -> Settings.ACTION_BLUETOOTH_SETTINGS
+            text == "open settings" || text == "settings" -> Settings.ACTION_SETTINGS
+            else -> return false
+        }
+        val intent = Intent(action)
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(intent)
+        return true
+    }
+
+    // --- Battery / storage info ---
+    fun tryDeviceInfo(context: Context, heard: String): String? {
+        val text = heard.lowercase().trim()
+
+        if (text.contains("battery")) {
+            val batteryStatus = context.registerReceiver(
+                null, IntentFilter(Intent.ACTION_BATTERY_CHANGED)
+            )
+            val level = batteryStatus?.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1) ?: -1
+            val scale = batteryStatus?.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, -1) ?: -1
+            if (level >= 0 && scale > 0) {
+                val percent = (level * 100 / scale)
+                return "Battery is at $percent percent."
+            }
+            return "I couldn't read the battery level."
+        }
+
+        if (text.contains("storage") || text.contains("free space")) {
+            return try {
+                val stat = StatFs(android.os.Environment.getDataDirectory().path)
+                val freeGb = stat.availableBytes / (1024.0 * 1024.0 * 1024.0)
+                val totalGb = stat.totalBytes / (1024.0 * 1024.0 * 1024.0)
+                "You have %.1f gigabytes free out of %.1f total.".format(freeGb, totalGb)
+            } catch (e: Exception) {
+                "I couldn't read storage info."
+            }
+        }
+
+        return null
     }
 
     private fun lookupContactNumber(context: Context, name: String): String? {

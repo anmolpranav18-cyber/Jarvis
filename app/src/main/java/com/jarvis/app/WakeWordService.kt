@@ -4,7 +4,6 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
-import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -33,7 +32,6 @@ class WakeWordService : Service() {
     private var awaitingCommand = false
     private var running = false
     private val handler by lazy { Handler(mainLooper) }
-    private val audioManager by lazy { getSystemService(AUDIO_SERVICE) as AudioManager }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -58,7 +56,6 @@ class WakeWordService : Service() {
         speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
             setRecognitionListener(object : RecognitionListener {
                 override fun onResults(results: Bundle?) {
-                    unmuteBeep()
                     val heard = results
                         ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                         ?.firstOrNull()
@@ -69,7 +66,6 @@ class WakeWordService : Service() {
                 }
 
                 override fun onError(error: Int) {
-                    unmuteBeep()
                     handler.postDelayed({ startListeningCycle() }, 400)
                 }
 
@@ -87,38 +83,7 @@ class WakeWordService : Service() {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
             }
-            muteBeep()
             startListening(intent)
-        }
-    }
-
-    // Attempts to silence the system's "start listening" tone. Not
-    // guaranteed to work on every device/OEM, since this sound is
-    // played by the underlying recognition service, not our app —
-    // different phones route it through different audio streams, so
-    // we try muting all the likely candidates.
-    private val streamsToMute = intArrayOf(
-        AudioManager.STREAM_MUSIC,
-        AudioManager.STREAM_SYSTEM,
-        AudioManager.STREAM_NOTIFICATION,
-        AudioManager.STREAM_RING
-    )
-
-    private fun muteBeep() {
-        for (stream in streamsToMute) {
-            try {
-                audioManager.adjustStreamVolume(stream, AudioManager.ADJUST_MUTE, 0)
-            } catch (_: Throwable) {
-            }
-        }
-    }
-
-    private fun unmuteBeep() {
-        for (stream in streamsToMute) {
-            try {
-                audioManager.adjustStreamVolume(stream, AudioManager.ADJUST_UNMUTE, 0)
-            } catch (_: Throwable) {
-            }
         }
     }
 
@@ -174,6 +139,34 @@ class WakeWordService : Service() {
         if (SystemActions.trySearch(this, text)) {
             log("Jarvis: Here's what I found.")
             speak("Here's what I found.")
+            return
+        }
+        if (SystemActions.tryPhoto(this, text)) {
+            log("Jarvis: Opening camera.")
+            speak("Opening camera.")
+            return
+        }
+        if (SystemActions.trySettings(this, text)) {
+            log("Jarvis: Opening settings.")
+            speak("Opening settings.")
+            return
+        }
+        val flashlightResult = SystemActions.tryFlashlight(this, text)
+        if (flashlightResult != null) {
+            log("Jarvis: $flashlightResult")
+            speak(flashlightResult)
+            return
+        }
+        val volumeResult = SystemActions.tryVolume(this, text)
+        if (volumeResult != null) {
+            log("Jarvis: $volumeResult")
+            speak(volumeResult)
+            return
+        }
+        val deviceInfoResult = SystemActions.tryDeviceInfo(this, text)
+        if (deviceInfoResult != null) {
+            log("Jarvis: $deviceInfoResult")
+            speak(deviceInfoResult)
             return
         }
         val mathAnswer = SystemActions.tryMath(text)
