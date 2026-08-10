@@ -33,6 +33,12 @@ android {
     buildFeatures {
         viewBinding true
     }
+
+    packagingOptions {
+        jniLibs {
+            pickFirsts += listOf("lib/**/libc++_shared.so")
+        }
+    }
 }
 
 dependencies {
@@ -41,5 +47,7 @@ dependencies {
     implementation 'com.google.android.material:material:1.12.0'
     implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
     implementation 'androidx.localbroadcastmanager:localbroadcastmanager:1.1.0'
-
+    implementation 'com.alphacephei:vosk-android:0.3.75'
+    implementation 'net.java.dev.jna:jna:5.13.0@aar'
 }
+

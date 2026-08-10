@@ -5,18 +5,26 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
 import android.os.Build
-import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
-import android.speech.RecognitionListener
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
-import android.speech.tts.TextToSpeech
 import androidx.core.app.NotificationCompat
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
+import org.json.JSONObject
+import org.vosk.Model
+import org.vosk.Recognizer
+import org.vosk.android.RecognitionListener
+import org.vosk.android.SpeechService
+import org.vosk.android.StorageService
 import java.util.Locale
 
-class WakeWordService : Service() {
+/**
+ * Runs continuously in the background (foreground service, so Android
+ * won't kill it for using the mic) and listens for the word "Jarvis"
+ * using Vosk — a fully offline, free speech engine with no account or
+ * API key, and no external "listening" sound since it never invokes
+ * Android's built-in recognizer UI.
+ */
+class WakeWordService : Service(), RecognitionListener {
 
     companion object {
         const val CHANNEL_ID = "jarvis_channel"
@@ -24,10 +32,12 @@ class WakeWordService : Service() {
         const val ACTION_LOG = "com.jarvis.app.LOG"
         const val EXTRA_LOG = "log"
         const val WAKE_WORD = "jarvis"
+        const val SAMPLE_RATE = 16000.0f
     }
 
-    private var tts: TextToSpeech? = null
-    private var speechRecognizer: SpeechRecognizer? = null
+    private var tts: android.speech.tts.TextToSpeech? = null
+    private var model: Model? = null
+    private var speechService: SpeechService? = null
     private val commandProcessor = CommandProcessor()
     private var awaitingCommand = false
     private var running = false
@@ -38,52 +48,65 @@ class WakeWordService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        startForeground(NOTIF_ID, buildNotification("Listening for \"Jarvis\"…"))
-        tts = TextToSpeech(this) { }
+        startForeground(NOTIF_ID, buildNotification("Loading voice model…"))
+        tts = android.speech.tts.TextToSpeech(this) { }
         running = true
-        startListeningCycle()
+        log("Loading voice model…")
+        StorageService.unpack(
+            this, "model-en-us", "model",
+            { loadedModel ->
+                model = loadedModel
+                startListening()
+                log("Listening for \"Jarvis\"…")
+            },
+            { exception ->
+                log("Failed to load voice model: ${exception.message}")
+            }
+        )
     }
 
-    private fun startListeningCycle() {
+    private fun startListening() {
         if (!running) return
-
-        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            log("Speech recognition not available on this device.")
-            return
+        val m = model ?: return
+        try {
+            val recognizer = Recognizer(m, SAMPLE_RATE)
+            speechService = SpeechService(recognizer, SAMPLE_RATE)
+            speechService?.startListening(this)
+        } catch (e: Exception) {
+            log("Failed to start listening: ${e.message}")
         }
+    }
 
-        speechRecognizer?.destroy()
-        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
-            setRecognitionListener(object : RecognitionListener {
-                override fun onResults(results: Bundle?) {
-                    val heard = results
-                        ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                        ?.firstOrNull()
-                        ?.lowercase(Locale.getDefault()) ?: ""
+    override fun onResult(hypothesis: String?) {
+        val text = parseText(hypothesis)
+        if (text.isNotEmpty()) handleHeard(text)
+    }
 
-                    handleHeard(heard)
-                    handler.postDelayed({ startListeningCycle() }, 400)
-                }
+    override fun onFinalResult(hypothesis: String?) {
+        val text = parseText(hypothesis)
+        if (text.isNotEmpty()) handleHeard(text)
+    }
 
-                override fun onError(error: Int) {
-                    handler.postDelayed({ startListeningCycle() }, 400)
-                }
+    override fun onPartialResult(hypothesis: String?) {
+        // Not used — we act on completed phrases only.
+    }
 
-                override fun onReadyForSpeech(params: Bundle?) {}
-                override fun onBeginningOfSpeech() {}
-                override fun onRmsChanged(rmsdB: Float) {}
-                override fun onBufferReceived(buffer: ByteArray?) {}
-                override fun onEndOfSpeech() {}
-                override fun onPartialResults(partialResults: Bundle?) {}
-                override fun onEvent(eventType: Int, params: Bundle?) {}
-            })
+    override fun onError(exception: Exception?) {
+        log("Recognition error, restarting…")
+        handler.postDelayed({ startListening() }, 500)
+    }
 
-            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
-                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
-            }
-            startListening(intent)
+    override fun onTimeout() {
+        speechService?.stop()
+        handler.postDelayed({ startListening() }, 200)
+    }
+
+    private fun parseText(hypothesis: String?): String {
+        if (hypothesis.isNullOrBlank()) return ""
+        return try {
+            JSONObject(hypothesis).optString("text", "").lowercase(Locale.getDefault())
+        } catch (e: Exception) {
+            ""
         }
     }
 
@@ -183,9 +206,6 @@ class WakeWordService : Service() {
             return
         }
 
-        // Nothing matched locally — try a free Wikipedia lookup first,
-        // then fall back to the AI (if a key is saved) for anything
-        // Wikipedia can't answer.
         log("Looking that up…")
         Thread {
             val topic = text.removePrefix("what is ").removePrefix("who is ")
@@ -218,7 +238,7 @@ class WakeWordService : Service() {
     }
 
     private fun speak(text: String) {
-        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "jarvis_utterance")
+        tts?.speak(text, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "jarvis_utterance")
     }
 
     private fun log(message: String) {
@@ -245,7 +265,8 @@ class WakeWordService : Service() {
 
     override fun onDestroy() {
         running = false
-        speechRecognizer?.destroy()
+        speechService?.stop()
+        speechService?.shutdown()
         tts?.stop()
         tts?.shutdown()
         super.onDestroy()
