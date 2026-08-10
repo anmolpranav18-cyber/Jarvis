@@ -75,6 +75,19 @@ class MainActivity : AppCompatActivity() {
                 prefs.edit().putString("groq_api_key", apiKeyInput.text.toString().trim()).apply()
                 Toast.makeText(this, "API key saved", Toast.LENGTH_SHORT).show()
             }
+
+            val overlayPermButton = findViewById<Button>(R.id.overlayPermButton)
+            overlayPermButton.setOnClickListener {
+                if (!android.provider.Settings.canDrawOverlays(this)) {
+                    val overlayIntent = Intent(
+                        android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        android.net.Uri.parse("package:$packageName")
+                    )
+                    startActivity(overlayIntent)
+                } else {
+                    Toast.makeText(this, "Already enabled", Toast.LENGTH_SHORT).show()
+                }
+            }
         } catch (e: Throwable) {
             val sw = StringWriter()
             e.printStackTrace(PrintWriter(sw))

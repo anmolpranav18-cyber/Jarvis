@@ -25,9 +25,14 @@ object AppLauncher {
         } ?: return false
 
         val intent = pm.getLaunchIntentForPackage(match.packageName) ?: return false
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        context.startActivity(intent)
-        return true
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        return try {
+            context.startActivity(intent)
+            true
+        } catch (e: Exception) {
+            android.util.Log.e("JarvisAppLauncher", "Failed to launch ${match.packageName}", e)
+            false
+        }
     }
 }
 
