@@ -46,6 +46,26 @@
         android:backgroundTint="@color/jarvis_accent_dim"
         android:textColor="@color/jarvis_text" />
 
+    <EditText
+        android:id="@+id/apiKeyInput"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:hint="Paste free Groq API key (optional)"
+        android:textColorHint="@color/jarvis_text_dim"
+        android:textColor="@color/jarvis_text"
+        android:inputType="textPassword"
+        android:singleLine="true" />
+
+    <Button
+        android:id="@+id/saveKeyButton"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:layout_marginTop="8dp"
+        android:text="Save Key"
+        android:backgroundTint="@color/jarvis_accent_dim"
+        android:textColor="@color/jarvis_text" />
+
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -71,3 +91,4 @@
     </ScrollView>
 
 </LinearLayout>
+

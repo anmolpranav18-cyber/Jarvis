@@ -9,8 +9,10 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.widget.Button
+import android.widget.EditText
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
@@ -63,6 +65,15 @@ class MainActivity : AppCompatActivity() {
 
             toggleButton.setOnClickListener {
                 if (serviceRunning) stopJarvis() else requestPermissionsAndStart()
+            }
+
+            val apiKeyInput = findViewById<EditText>(R.id.apiKeyInput)
+            val saveKeyButton = findViewById<Button>(R.id.saveKeyButton)
+            val prefs = getSharedPreferences("jarvis", MODE_PRIVATE)
+            apiKeyInput.setText(prefs.getString("groq_api_key", ""))
+            saveKeyButton.setOnClickListener {
+                prefs.edit().putString("groq_api_key", apiKeyInput.text.toString().trim()).apply()
+                Toast.makeText(this, "API key saved", Toast.LENGTH_SHORT).show()
             }
         } catch (e: Throwable) {
             val sw = StringWriter()

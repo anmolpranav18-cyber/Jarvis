@@ -183,17 +183,36 @@ class WakeWordService : Service() {
             return
         }
 
-        // Nothing matched locally — try a free Wikipedia lookup as a
-        // last resort before giving up.
+        // Nothing matched locally — try a free Wikipedia lookup first,
+        // then fall back to the AI (if a key is saved) for anything
+        // Wikipedia can't answer.
         log("Looking that up…")
         Thread {
             val topic = text.removePrefix("what is ").removePrefix("who is ")
                 .removePrefix("what's ").removePrefix("tell me about ").trim()
-            val answer = WikipediaClient.lookup(topic.ifBlank { text })
-                ?: "I heard: $text. I couldn't find anything on that."
+            val wikiAnswer = WikipediaClient.lookup(topic.ifBlank { text })
+
+            if (wikiAnswer != null) {
+                handler.post {
+                    log("Jarvis: $wikiAnswer")
+                    speak(wikiAnswer)
+                }
+                return@Thread
+            }
+
+            val apiKey = getSharedPreferences("jarvis", MODE_PRIVATE).getString("groq_api_key", null)
+            val finalAnswer = if (!apiKey.isNullOrBlank()) {
+                try {
+                    AiClient.ask(apiKey, text)
+                } catch (e: Exception) {
+                    "Sorry, I couldn't reach the AI service."
+                }
+            } else {
+                "I heard: $text. I don't have an answer for that."
+            }
             handler.post {
-                log("Jarvis: $answer")
-                speak(answer)
+                log("Jarvis: $finalAnswer")
+                speak(finalAnswer)
             }
         }.start()
     }
