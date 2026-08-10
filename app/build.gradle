@@ -36,7 +36,7 @@ android {
 
     packagingOptions {
         jniLibs {
-            pickFirsts += listOf("lib/**/libc++_shared.so")
+            pickFirsts += ['lib/**/libc++_shared.so']
         }
     }
 }
